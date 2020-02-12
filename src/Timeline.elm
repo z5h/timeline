@@ -1,9 +1,9 @@
 module Timeline exposing
     ( Timeline, Msg, Status(..)
     , init, update, subscriptions, view, viewDocument, msg
-    , value, transition, map, withDefault
+    , value, transition, map, withDefault, sequence
     , currentTime
-    , push, sequence
+    , push
     )
 
 {-|
@@ -13,15 +13,17 @@ module Timeline exposing
 
 Timeline helps you animate the state changes of your `Model`.
 
-It is designed to be very simple to integrate (a few minutes) and simultaneously
-provides direct access to your model as well as a `Timeline Model` for animation
-purposes.
+It is designed to be very simple to integrate (a few minutes).
+
+Once integrated, Timeline provides direct access to your model when needed.
+It also provides access to how any part of your model has transitioned over time,
+allowing you easily animate any property change.
 
 **Important:** Timeline keeps a (garbage collected) history of your model states.
 If your model updates at a modest pace then this API should be fine.
 
-> When a pause between model changes exceeds the transition/animation duration,
-> then model history can be discarded.
+Specifically, when a pause between model changes exceeds the transition/animation duration,
+then model history can be discarded.
 
 If your model has very high churn (e.g. You're doing `Time.every 5`) then this is
 not the API for you.
@@ -68,7 +70,7 @@ In short, we are using functions in timeline to turn our program into a
 Note: The first two parameters to `Timeline.init` are the max duration of an animation (this is to aid garbage collection),
 and the current time (safe to set to `0` for now, and discuss later).
 
-Your `init`, `update` and `subscriptions` remain unchanged.
+Your `init`, `update` and `subscriptions` remain unchanged. 🎉
 
 Your `view`, instead of having type
 
@@ -125,12 +127,17 @@ state from a previous one, you can use the transition factor to do animations.
 
 # Rendering and animating during view
 
-@docs value, transition, map, withDefault
+@docs value, transition, map, withDefault, sequence
 
 
 # Utility
 
 @docs currentTime
+
+
+# Other
+
+@docs push
 
 -}
 
@@ -175,6 +182,10 @@ type alias Timeline t =
 {-| Get the current time from a timeline.
 Updated internally via `Browser.Events.onAnimationFrame`, thus inheriting its
 resolution.
+
+Having this prevents the need from tracking a high resolution time value in your model,
+because doing such a thing would prohibit use of Timeline due to GC issues.
+
 -}
 currentTime : Timeline t -> Posix
 currentTime =
@@ -294,6 +305,8 @@ msg =
     Msg
 
 
+{-| Exposed for testing. You don't need this.
+-}
 push : Event t -> Timeline t -> Timeline t
 push e timeline =
     let
@@ -497,10 +510,9 @@ Are we transitioning between values, or statically at a value?
                 -- our menu is transitioning.
                 -- `remaining` goes `1.0 -> 0.0` as `from -> to`
 
-
-    The `remaining` float value returned is not linear, but a dampened-spring
-    eased value. Use it directly (with a multiplier) to fade, scale, translate
-    with a natural and pleasant effect.
+The `remaining` float value returned is not linear, but a dampened-spring
+eased value. Use it directly (with a multiplier) to fade, scale, translate
+with a natural and pleasant effect.
 
 -}
 transition : Int -> Timeline t -> Status t
@@ -508,23 +520,18 @@ transition duration timeline =
     transitionHelper timeline.now duration timeline.current timeline.history
 
 
-{-|
+{-| Turns a `Timeline (List a)` to a `List (Timeline (Maybe a))`.
 
-    Turns a `Timeline (List a)` to a `List (Timeline (Maybe a))`.
+When we look at a changing list, typically that list is changing because
+values are being inserted or removed or modified.
+So, if we are rendering a list into a list-like view, we want to know
+what the Timeline is for **each slot**. That's what this is for.
 
-    This is useful, because when look at a single value (a String) it's
-    sufficient to to know its history to animate accordingly.
+Because a slot (in this visualisation) might start as empty and have
+something inserted, or vice versa, we return a `Timeline` of `Maybe a`.
 
-    When we look at a changing list, typically that list is changing because
-    values are being inserted or removed or modified.
-    So, if we are rendering a list into a list-like view, we want to know
-    what the Timeline is for each slot. That's what this is for.
-
-    Because a slot (in this visualisation) might start as empty and have
-    something inserted, or vice versa, we return a `Timeline` of `Maybe a`.
-
-    The initial parameter is an `id` function which allows us to track an
-    entry's index in the list as it's value changes over time.
+The initial parameter is an `id` function which allows us to track an
+entry's index in the list as it's value changes over time.
 
 -}
 sequence : (a -> id) -> Timeline (List a) -> List (Timeline (Maybe a))
