@@ -3,7 +3,7 @@
     "name": "z5h/timeline",
     "summary": "Timeline helps you add smooth transition animations to Elm programs.",
     "license": "MIT",
-    "version": "1.0.0",
+    "version": "1.0.1",
     "exposed-modules": [
         "Timeline"
     ],
