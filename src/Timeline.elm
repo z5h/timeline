@@ -641,6 +641,7 @@ sequence id timeline =
             zip event.time diff timeLines
     in
     List.foldl step initialTimelines tail
+        |> List.map (\t -> { t | now = timeline.now })
 
 
 transitionHelper : Posix -> Int -> Event t -> List (Event t) -> Status t
