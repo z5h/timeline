@@ -1,6 +1,10 @@
 # Timeline
 Convert static model changes into smooth transitions to animate.
 
+## Example
+
+See [this Ellie](https://ellie-app.com/82p3nvbZfMCa1) for a simple example. 
+
 ## Introduction
 
 Timeline helps you animate the state changes of your `Model`.
