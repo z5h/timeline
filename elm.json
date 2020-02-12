@@ -1,7 +1,7 @@
 {
     "type": "package",
     "name": "z5h/timeline",
-    "summary": "Convenience functions for Components.",
+    "summary": "Timeline helps you add smooth transition animations to Elm programs.",
     "license": "MIT",
     "version": "1.0.0",
     "exposed-modules": [
