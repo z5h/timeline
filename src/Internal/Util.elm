@@ -1,4 +1,4 @@
-module Util exposing (listFind, reverseNonEmpty, timeDiff)
+module Internal.Util exposing (listFind, reverseNonEmpty, timeDiff)
 
 import Time exposing (Posix)
 

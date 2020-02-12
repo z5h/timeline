@@ -3,7 +3,7 @@ module Timeline exposing
     , init, update, subscriptions, view, viewDocument, msg
     , value, transition, map, withDefault
     , currentTime
-    , debug, debugPush, historyList, sequence
+    , push, sequence
     )
 
 {-|
@@ -138,8 +138,8 @@ import Browser
 import Browser.Events
 import Diff
 import Html exposing (Html)
+import Internal.Util exposing (..)
 import Time exposing (Posix)
-import Util exposing (..)
 
 
 
@@ -506,32 +506,6 @@ Are we transitioning between values, or statically at a value?
 transition : Int -> Timeline t -> Status t
 transition duration timeline =
     transitionHelper timeline.now duration timeline.current timeline.history
-
-
-debug : t -> Timeline t
-debug t =
-    let
-        now =
-            Time.millisToPosix 0
-    in
-    Timeline (Event now t) [] 1 now now
-
-
-debugPush : t -> Timeline t -> Timeline t
-debugPush t timeline =
-    let
-        now =
-            timeline.now |> Time.posixToMillis |> (+) 1 |> Time.millisToPosix
-    in
-    timeline |> push (Event now t)
-
-
-historyList : Timeline t -> List ( Int, t )
-historyList timeline =
-    timeline.current
-        :: timeline.history
-        |> List.reverse
-        |> List.map (\e -> ( e.time |> Time.posixToMillis, e.value ))
 
 
 {-|
