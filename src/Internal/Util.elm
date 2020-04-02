@@ -1,6 +1,23 @@
-module Internal.Util exposing (listFind, reverseNonEmpty, timeDiff)
+module Internal.Util exposing
+    ( addMilliseconds
+    , after
+    , keyframes
+    , listFind
+    , reverseNonEmpty
+    , timeDiff
+    )
 
 import Time exposing (Posix)
+
+
+addMilliseconds : Int -> Posix -> Posix
+addMilliseconds ms p =
+    Time.posixToMillis p |> (+) ms |> Time.millisToPosix
+
+
+after : Posix -> Posix -> Bool
+after this other =
+    Time.posixToMillis other > Time.posixToMillis this
 
 
 timeDiff : Posix -> Posix -> Int
@@ -37,3 +54,35 @@ listFind pred list =
 
         [] ->
             Nothing
+
+
+keyframes : String
+keyframes =
+    """
+@keyframes z5h_timeline_fade_in_### {
+    from { opacity: 0 }
+    to { opacity: 1 }
+}
+
+@keyframes z5h_timeline_fade_out_### {
+    from { opacity: 1 }
+    to { opacity: 0 }
+}
+
+@keyframes z5h_timeline_slide_left_out_### {
+    from { transform: translateX(0%) }
+    to { transform: translateX(-100%) }
+
+}
+
+@keyframes z5h_timeline_slide_left_in_### {
+    from { transform: translateX(-100%) }
+    to { transform: translateX(0%) }
+}
+"""
+        |> (\s ->
+                String.join "\n"
+                    [ s |> String.replace "###" "0"
+                    , s |> String.replace "###" "1"
+                    ]
+           )

@@ -4,6 +4,7 @@ module Timeline exposing
     , value, transition, map, withDefault, sequence
     , currentTime
     , push
+    , ease
     )
 
 {-|
@@ -60,8 +61,10 @@ import Browser
 import Browser.Events
 import Diff
 import Html exposing (Html)
+import Html.Lazy
 import Internal.Util exposing (..)
 import Time exposing (Posix)
+import Url
 
 
 
@@ -80,6 +83,19 @@ mapEvent f e =
     Event e.time (f e.value)
 
 
+type alias Bit =
+    Int
+
+
+flip : Bit -> Bit
+flip bit =
+    if bit == 1 then
+        0
+
+    else
+        1
+
+
 {-| A timeline of your model's history.
 History is only held long enough to ensure smooth transitions,
 based on the maximum transition duration value supplied to `init`.
@@ -90,8 +106,14 @@ type alias Timeline t =
     , history : List (Event t)
     , limit : Int
     , now : Posix
-    , start : Posix
+    , key : Posix
+    , flipFlop : Bit
     }
+
+
+longAgo : Posix
+longAgo =
+    0 |> Time.millisToPosix
 
 
 {-| Get the current time from a timeline.
@@ -138,9 +160,9 @@ most use cases. But seeing as you can animate a static state based on it's age,
 this is important to know.
 
 -}
-init : Int -> Posix -> ( model, Cmd msg ) -> ( Timeline model, Cmd (Msg msg) )
-init limit now ( model, cmd ) =
-    ( Timeline { value = model, time = now } [] limit now now
+init : Int -> ( model, Cmd msg ) -> ( Timeline model, Cmd (Msg msg) )
+init limit ( model, cmd ) =
+    ( Timeline { value = model, time = longAgo } [] limit longAgo longAgo 0
     , Cmd.map Msg cmd
     )
 
@@ -154,16 +176,33 @@ update : (msg -> model -> ( model, Cmd msg )) -> (Msg msg -> Timeline model -> (
 update update_ msg_ timeline =
     case msg_ of
         UpdateTime posix ->
-            ( { timeline | now = posix }, Cmd.none )
+            ( { timeline | now = posix } |> updateKey, Cmd.none )
 
         Msg msg__ ->
             let
                 ( newModel, cmd ) =
                     update_ msg__ (value timeline)
             in
-            ( timeline |> push { value = newModel, time = timeline.now }
+            ( timeline |> push { value = newModel, time = timeline.now } |> updateKey
             , Cmd.map Msg cmd
             )
+
+
+updateKey : Timeline t -> Timeline t
+updateKey timeline =
+    if timeDiff timeline.now timeline.current.time > timeline.limit then
+        let
+            newKey =
+                timeline.current.time |> addMilliseconds timeline.limit
+        in
+        if timeline.key == newKey then
+            timeline
+
+        else
+            { timeline | key = newKey }
+
+    else
+        { timeline | key = timeline.now }
 
 
 {-| Converts your existing `subscriptions` to a Timeline compatible `subscriptions`.
@@ -186,8 +225,24 @@ a `Timeline model -> Html (Timeline.Msg msg)` for use in your `main`.
 
 -}
 view : (Timeline model -> Html msg) -> (Timeline model -> Html (Msg msg))
-view view_ =
-    view_ >> Html.map Msg
+view view_ timeline_ =
+    Html.Lazy.lazy6
+        lazyView
+        timeline_.current
+        timeline_.history
+        timeline_.limit
+        timeline_.key
+        timeline_.flipFlop
+        view_
+        |> Html.map Msg
+
+
+lazyView current history limit timestamp flipFlop view_ =
+    let
+        _ =
+            Debug.log "Lazy" "View"
+    in
+    view_ (Timeline current history limit timestamp timestamp flipFlop)
 
 
 {-| Convenience function.
@@ -227,10 +282,14 @@ push e timeline =
     let
         now =
             e.time
+
+        flipFlop =
+            flip timeline.flipFlop
     in
     if e.value == timeline.current.value then
         { timeline
             | now = now
+            , flipFlop = flipFlop
         }
 
     else
@@ -250,12 +309,7 @@ push e timeline =
                             timeline.history
                        )
             , now = now
-            , start =
-                if garbageCollectHistory then
-                    timeline.current.time
-
-                else
-                    timeline.start
+            , flipFlop = flipFlop
         }
 
 
@@ -288,7 +342,7 @@ independently.
 
 -}
 map : (t -> s) -> Timeline t -> Timeline s
-map f { current, history, now, limit } =
+map f { current, history, now, limit, flipFlop, key } =
     let
         ( first, rest ) =
             reverseNonEmpty ( current, history )
@@ -297,13 +351,13 @@ map f { current, history, now, limit } =
             mapEvent f
 
         initial =
-            { current = mapf first, history = [], now = first.time, start = first.time, limit = limit }
+            { current = mapf first, history = [], now = longAgo, key = longAgo, limit = limit, flipFlop = 0 }
     in
     List.foldl
         (\e t -> push (mapf e) t)
         initial
         rest
-        |> (\timeline -> { timeline | now = now })
+        |> (\timeline -> { timeline | now = now, key = key, flipFlop = flipFlop })
 
 
 {-| This is for treating non-continuous Timelines as continuous. Usually occurs
@@ -388,8 +442,9 @@ withDefault t timeline =
     { current = current
     , history = timeline.history |> List.filterMap maybeEvent
     , now = timeline.now
+    , key = timeline.key
     , limit = timeline.limit
-    , start = timeline.start
+    , flipFlop = timeline.flipFlop
     }
 
 
@@ -403,8 +458,18 @@ with a natural and pleasant effect.
 
 -}
 type Status t
-    = At t Int
+    = At t
     | Transitioning t t Float
+
+
+ease : Status t -> Status t
+ease status =
+    case status of
+        At t ->
+            At t
+
+        Transitioning t0 t1 f ->
+            Transitioning t0 t1 (niceBezier f)
 
 
 {-| Given a duration for how long a transition on a timeline takes,
@@ -460,7 +525,7 @@ sequence id timeline =
             head.value
                 |> List.map
                     (\singListValue ->
-                        Timeline (Event head.time (Just <| singListValue)) [] timeline.limit head.time head.time
+                        Timeline (Event head.time (Just <| singListValue)) [] timeline.limit longAgo longAgo 0
                     )
 
         zip : Posix -> List (Diff.Change (Maybe a)) -> List (Timeline (Maybe a)) -> List (Timeline (Maybe a))
@@ -470,7 +535,7 @@ sequence id timeline =
                     []
 
                 ( (Diff.Added (Just a)) :: rest, _ ) ->
-                    (Timeline (Event timeline.start Nothing) [] timeline.limit timeline.start timeline.start
+                    (Timeline (Event longAgo Nothing) [] timeline.limit longAgo longAgo 0
                         |> push (Event now (Just a))
                     )
                         :: zip now rest timelines
@@ -563,62 +628,83 @@ sequence id timeline =
             zip event.time diff timeLines
     in
     List.foldl step initialTimelines tail
-        |> List.map (\t -> { t | now = timeline.now })
+        |> List.map (\t -> { t | now = timeline.now, flipFlop = timeline.flipFlop })
 
 
 transitionHelper : Posix -> Int -> Event t -> List (Event t) -> Status t
 transitionHelper now duration e events =
     case events of
         [] ->
-            At e.value (timeDiff now e.time)
+            At e.value
 
         prev :: [] ->
-            spring 1.0 (timeDiff now e.time) duration
-                |> (\springPos ->
-                        if springPos == 0 then
-                            At e.value (timeDiff now e.time)
+            remaining (timeDiff now e.time) duration
+                |> (\remaining_ ->
+                        if remaining_ == 0 then
+                            At e.value
 
                         else
-                            Transitioning prev.value e.value springPos
+                            Transitioning prev.value e.value remaining_
                    )
 
         prev :: rest ->
             let
                 midTransition =
-                    transitionHelper now duration prev rest
+                    transitionHelper e.time duration prev rest
             in
             case midTransition of
-                At prevValue _ ->
-                    spring 1.0 (timeDiff now e.time) duration
-                        |> (\springPos ->
-                                if springPos == 0 then
-                                    At e.value (timeDiff now e.time)
+                At prevValue ->
+                    remaining (timeDiff now e.time) duration
+                        |> (\remaining_ ->
+                                if remaining_ == 0 then
+                                    At e.value
 
                                 else
-                                    Transitioning prevValue e.value springPos
+                                    Transitioning prevValue e.value remaining_
                            )
 
-                Transitioning _ prevValue transitionSpringPos ->
-                    spring (1 - transitionSpringPos)
-                        (timeDiff now e.time)
-                        duration
-                        |> (\springPos ->
-                                if springPos == 0 then
-                                    At e.value (timeDiff now e.time)
+                Transitioning _ prevValue remaining_ ->
+                    remaining (timeDiff now e.time) duration
+                        - remaining_
+                        |> (\newRemaining_ ->
+                                if newRemaining_ <= 0 then
+                                    At e.value
 
                                 else
-                                    Transitioning prevValue e.value springPos
+                                    Transitioning prevValue e.value newRemaining_
                            )
 
 
-spring : Float -> Int -> Int -> Float
-spring x0 complete duration =
-    let
-        dt =
-            toFloat complete / toFloat duration
-    in
-    if dt > 1.0 then
+remaining : Int -> Int -> Float
+remaining complete duration =
+    if complete >= duration then
         0.0
 
     else
-        (x0 + 8 * x0 * dt) * (e ^ (-8 * dt))
+        1.0 - toFloat complete / toFloat duration
+
+
+niceBezier : Float -> Float
+niceBezier f =
+    bezier 0.78 0 0.22 1 f
+
+
+bezier : Float -> Float -> Float -> Float -> Float -> Float
+bezier x1 y1 x2 y2 time =
+    let
+        lerp from to v =
+            from + (to - from) * v
+
+        pair interpolate ( a0, b0 ) ( a1, b1 ) v =
+            ( interpolate a0 a1 v, interpolate b0 b1 v )
+
+        casteljau ps =
+            case ps of
+                [ ( x, y ) ] ->
+                    y
+
+                xs ->
+                    List.map2 (\x y -> pair lerp x y time) xs (Maybe.withDefault [] (List.tail xs))
+                        |> casteljau
+    in
+    casteljau [ ( 0, 0 ), ( x1, y1 ), ( x2, y2 ), ( 1, 1 ) ]
