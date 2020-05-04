@@ -4,7 +4,7 @@ module Timeline exposing
     , value, transition, map, withDefault, sequence
     , currentTime
     , push
-    , ease
+    , Playback(..), definitely, ease, transitions
     )
 
 {-|
@@ -64,7 +64,6 @@ import Html exposing (Html)
 import Html.Lazy
 import Internal.Util exposing (..)
 import Time exposing (Posix)
-import Url
 
 
 
@@ -360,6 +359,31 @@ map f { current, history, now, limit, flipFlop, key } =
         |> (\timeline -> { timeline | now = now, key = key, flipFlop = flipFlop })
 
 
+definitely : Timeline (Maybe t) -> Maybe (Timeline t)
+definitely { current, history, now, limit, flipFlop, key } =
+    current
+        :: history
+        |> List.filterMap maybeEvent
+        |> (\maybeEvents ->
+                case maybeEvents of
+                    [] ->
+                        Nothing
+
+                    first :: rest ->
+                        let
+                            initial =
+                                { current = first, history = [], now = longAgo, key = longAgo, limit = limit, flipFlop = 0 }
+                        in
+                        Just <|
+                            (List.foldl
+                                (\e t -> push e t)
+                                initial
+                                rest
+                                |> (\timeline -> { timeline | now = now, key = key, flipFlop = flipFlop })
+                            )
+           )
+
+
 {-| This is for treating non-continuous Timelines as continuous. Usually occurs
 when mapping your model (and hence Timeline) can result in unwanted maybes.
 
@@ -423,29 +447,34 @@ e.g.
 withDefault : t -> Timeline (Maybe t) -> Timeline t
 withDefault t timeline =
     let
-        current =
-            case timeline.current.value of
-                Just value_ ->
-                    { value = value_, time = timeline.current.time }
+        newFullHistory =
+            (timeline.current :: timeline.history) |> List.filterMap maybeEvent
 
-                Nothing ->
-                    { value = t, time = timeline.current.time }
+        ( newCurrent, newHistory ) =
+            case newFullHistory of
+                head :: tail ->
+                    ( head, tail )
 
-        maybeEvent event =
-            case event.value of
-                Just value_ ->
-                    Just { value = value_, time = event.time }
-
-                Nothing ->
-                    Nothing
+                [] ->
+                    ( { value = t, time = timeline.current.time }, [] )
     in
-    { current = current
-    , history = timeline.history |> List.filterMap maybeEvent
+    { current = newCurrent
+    , history = newHistory
     , now = timeline.now
     , key = timeline.key
     , limit = timeline.limit
     , flipFlop = timeline.flipFlop
     }
+
+
+maybeEvent : Event (Maybe b) -> Maybe (Event b)
+maybeEvent event =
+    case event.value of
+        Just value_ ->
+            Just { value = value_, time = event.time }
+
+        Nothing ->
+            Nothing
 
 
 {-| A transition status. Either `At` a value for a specific number of milliseconds,
@@ -460,6 +489,16 @@ with a natural and pleasant effect.
 type Status t
     = At t
     | Transitioning t t Float
+
+
+isAt : Status t -> Bool
+isAt status =
+    case status of
+        At _ ->
+            True
+
+        _ ->
+            False
 
 
 ease : Status t -> Status t
@@ -495,9 +534,47 @@ eased value. Use it directly (with a multiplier) to fade, scale, translate
 with a natural and pleasant effect.
 
 -}
-transition : Int -> Timeline t -> Status t
-transition duration timeline =
-    transitionHelper timeline.now duration timeline.current timeline.history
+transition : Playback -> Int -> Timeline t -> Status t
+transition playback duration timeline =
+    case playback of
+        Reversible ->
+            reversibleTransitionHelper False timeline.now duration timeline.current timeline.history
+
+        Interruptible ->
+            interruptibleTransitionHelper timeline.now duration timeline.current timeline.history
+
+        Restartable ->
+            reversibleTransitionHelper True timeline.now duration timeline.current timeline.history
+
+
+type Playback
+    = Reversible
+    | Interruptible
+    | Restartable
+
+
+transitions : Int -> Timeline t -> List (Status t)
+transitions duration timeline =
+    (timeline.current :: timeline.history)
+        |> listPairs
+        |> List.map
+            (\( event, maybePrev ) ->
+                case maybePrev of
+                    Nothing ->
+                        At event.value
+
+                    Just prev ->
+                        remaining (timeDiff timeline.now event.time) duration
+                            |> (\remaining_ ->
+                                    if remaining_ == 0 then
+                                        At event.value
+
+                                    else
+                                        Transitioning prev.value event.value remaining_
+                               )
+            )
+        |> listUntilInclusive isAt
+        |> Debug.log "transitions"
 
 
 {-| Turns a `Timeline (List a)` to a `List (Timeline (Maybe a))`.
@@ -631,8 +708,43 @@ sequence id timeline =
         |> List.map (\t -> { t | now = timeline.now, flipFlop = timeline.flipFlop })
 
 
-transitionHelper : Posix -> Int -> Event t -> List (Event t) -> Status t
-transitionHelper now duration e events =
+
+--transitionsHelper : Posix -> Int -> Event t -> List (Event t) -> List (Status t)
+--transitionsHelper now duration e events =
+--        case events of
+--            [] ->
+--                [At e.value]
+--
+--            prev :: [] ->
+--                remaining (timeDiff now e.time) duration
+--                    |> (\remaining_ ->
+--                            if remaining_ == 0 then
+--                                At e.value
+--
+--                            else
+--                                Transitioning prev.value e.value remaining_
+--                       )
+
+
+interruptibleTransitionHelper : Posix -> Int -> Event t -> List (Event t) -> Status t
+interruptibleTransitionHelper now duration e events =
+    case events of
+        [] ->
+            At e.value
+
+        prev :: _ ->
+            remaining (timeDiff now e.time) duration
+                |> (\remaining_ ->
+                        if remaining_ == 0 then
+                            At e.value
+
+                        else
+                            Transitioning prev.value e.value remaining_
+                   )
+
+
+reversibleTransitionHelper : Bool -> Posix -> Int -> Event t -> List (Event t) -> Status t
+reversibleTransitionHelper maximize now duration e events =
     case events of
         [] ->
             At e.value
@@ -650,7 +762,7 @@ transitionHelper now duration e events =
         prev :: rest ->
             let
                 midTransition =
-                    transitionHelper e.time duration prev rest
+                    reversibleTransitionHelper maximize e.time duration prev rest
             in
             case midTransition of
                 At prevValue ->
@@ -664,8 +776,19 @@ transitionHelper now duration e events =
                            )
 
                 Transitioning _ prevValue remaining_ ->
-                    remaining (timeDiff now e.time) duration
-                        - remaining_
+                    (if maximize then
+                        if remaining_ <= 0.5 then
+                            remaining (timeDiff now e.time) duration
+                                - remaining_
+
+                        else
+                            remaining (timeDiff now e.time) duration
+                                - (1 - remaining_)
+
+                     else
+                        remaining (timeDiff now e.time) duration
+                            - remaining_
+                    )
                         |> (\newRemaining_ ->
                                 if newRemaining_ <= 0 then
                                     At e.value

@@ -1,10 +1,10 @@
 module Discrete.Timeline exposing
-    ( Timeline, Msg
+    ( Timeline, Msg, Status
     , init, update, subscriptions, view, viewDocument, msg
-    , value, map, withDefault, sequence
+    , value, transition, map, withDefault, sequence
     , currentTime
     , push
-    , css, exitLeft, fade
+    , Playback(..), css, definitely, transitions, unwrap
     )
 
 {-|
@@ -58,6 +58,7 @@ state from a previous one, you can use the transition factor to do animations.
 -}
 
 import Browser
+import Discrete.Status
 import Html exposing (Html)
 import Html.Attributes
 import Html.Lazy
@@ -65,11 +66,6 @@ import Internal.Util exposing (..)
 import Time exposing (Posix)
 import Timeline
 import Url
-
-
-
--- Stuff
---
 
 
 type alias Event t =
@@ -285,6 +281,11 @@ map f =
     unwrap >> Timeline.map f >> Timeline
 
 
+definitely : Timeline (Maybe t) -> Maybe (Timeline t)
+definitely =
+    unwrap >> Timeline.definitely >> Maybe.map Timeline
+
+
 {-| This is for treating non-continuous Timelines as continuous. Usually occurs
 when mapping your model (and hence Timeline) can result in unwanted maybes.
 
@@ -350,85 +351,51 @@ withDefault t =
     unwrap >> Timeline.withDefault t >> Timeline
 
 
+{-| A transition status. Either `At` a value for a specific number of milliseconds,
+or `Transitioning` from one value to another, with a "remaining" float value.
 
---|> ease niceBezier
+Note that during a transition, the float value goes from `1.0 -> 0.0`.
+The "remaining" float value returned is not linear, but a dampened-spring
+eased value. Use it directly (with a multiplier) to fade, scale, translate
+with a natural and pleasant effect.
 
-
-fade : Int -> Timeline Bool -> (List (Html.Attribute msg) -> a) -> (List (Html.Attribute msg) -> a)
-fade duration (Timeline timeline) element =
-    let
-        status =
-            Timeline.transition duration timeline
-
-        attrs =
-            case status of
-                Timeline.At value_ ->
-                    if value_ then
-                        [ Html.Attributes.style "opacity" "1" ]
-
-                    else
-                        [ Html.Attributes.style "opacity" "0" ]
-
-                Timeline.Transitioning from to f ->
-                    if to then
-                        [ Html.Attributes.style "animation-delay" <| "-" ++ (String.fromFloat <| (1.0 - f) * toFloat duration) ++ "ms"
-                        , Html.Attributes.style "animation-name" "z5h_timeline_fade_in"
-                        , Html.Attributes.style "animation-fill-mode" "both"
-                        , Html.Attributes.style "animation-duration" (String.fromInt duration ++ "ms")
-                        ]
-
-                    else
-                        [ Html.Attributes.style "animation-delay" <| "-" ++ (String.fromFloat <| (1.0 - f) * toFloat duration) ++ "ms"
-                        , Html.Attributes.style "animation-name" "z5h_timeline_fade_out"
-                        , Html.Attributes.style "animation-fill-mode" "both"
-                        , Html.Attributes.style "animation-duration" (String.fromInt duration ++ "ms")
-                        ]
-    in
-    \newAttributes ->
-        element (attrs ++ newAttributes)
+-}
+type alias Status t =
+    Discrete.Status.Status t
 
 
-exitLeft : Int -> Timeline Bool -> (List (Html.Attribute msg) -> a) -> (List (Html.Attribute msg) -> a)
-exitLeft duration (Timeline timeline) element =
-    let
-        status =
-            Timeline.transition duration timeline
+transition : Playback -> Int -> Timeline t -> Status t
+transition playback duration timeline =
+    timeline
+        |> unwrap
+        |> Timeline.transition (playbackForTimeline playback) duration
+        |> Discrete.Status.fromTimelineStatus
 
-        attrs =
-            case status of
-                Timeline.At value_ ->
-                    if value_ then
-                        []
 
-                    else
-                        [ Html.Attributes.style "transform" "translateX(-100%)" ]
+transitions : Int -> Timeline t -> List (Status t)
+transitions duration =
+    unwrap
+        >> Timeline.transitions duration
+        >> List.map Discrete.Status.fromTimelineStatus
 
-                Timeline.Transitioning from to f ->
-                    let
-                        nowString =
-                            String.fromInt timeline.flipFlop
 
-                        delay =
-                            "-" ++ (String.fromFloat <| (+) 1 <| (1.0 - f) * toFloat duration) ++ "ms"
-                    in
-                    if to then
-                        [ Html.Attributes.style "animation-delay" delay
-                        , Html.Attributes.style "animation-name" <| "z5h_timeline_slide_left_in_" ++ nowString
-                        , Html.Attributes.style "animation-fill-mode" "forwards"
-                        , Html.Attributes.style "animation-duration" (String.fromInt duration ++ "ms")
-                        , Html.Attributes.style "animation-timing-function" niceBezierString
-                        ]
+type Playback
+    = Reversible
+    | Interruptible
+    | Restartable
 
-                    else
-                        [ Html.Attributes.style "animation-delay" delay
-                        , Html.Attributes.style "animation-name" <| "z5h_timeline_slide_left_out_" ++ nowString
-                        , Html.Attributes.style "animation-fill-mode" "forwards"
-                        , Html.Attributes.style "animation-duration" (String.fromInt duration ++ "ms")
-                        , Html.Attributes.style "animation-timing-function" niceBezierString
-                        ]
-    in
-    \newAttributes ->
-        element (attrs ++ newAttributes)
+
+playbackForTimeline : Playback -> Timeline.Playback
+playbackForTimeline p =
+    case p of
+        Reversible ->
+            Timeline.Reversible
+
+        Interruptible ->
+            Timeline.Interruptible
+
+        Restartable ->
+            Timeline.Restartable
 
 
 {-| Turns a `Timeline (List a)` to a `List (Timeline (Maybe a))`.
