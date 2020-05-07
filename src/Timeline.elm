@@ -553,28 +553,46 @@ type Playback
     | Restartable
 
 
-transitions : Int -> Timeline t -> List (Status t)
+transitions : Int -> Timeline t -> ( Status (Maybe t), List (Status (Maybe t)) )
 transitions duration timeline =
-    (timeline.current :: timeline.history)
-        |> listPairs
-        |> List.map
-            (\( event, maybePrev ) ->
-                case maybePrev of
-                    Nothing ->
-                        At event.value
+    case timeline.history of
+        [] ->
+            ( At <| Just timeline.current.value, [] )
 
-                    Just prev ->
-                        remaining (timeDiff timeline.now event.time) duration
-                            |> (\remaining_ ->
-                                    if remaining_ == 0 then
-                                        At event.value
+        _ ->
+            ( remaining (timeDiff timeline.now timeline.current.time) duration
+                |> (\remaining_ ->
+                        if remaining_ == 0 then
+                            At <| Just timeline.current.value
 
-                                    else
-                                        Transitioning prev.value event.value remaining_
-                               )
+                        else
+                            Transitioning Nothing (Just timeline.current.value) remaining_
+                   )
+            , (timeline.current :: timeline.history)
+                |> List.reverse
+                |> listPairs
+                |> List.filterMap
+                    (\( event, followingEvent ) ->
+                        let
+                            -- fade in from event until following event created
+                            fadeInRemaining =
+                                remaining (timeDiff event.time followingEvent.time) duration
+
+                            -- fade out once following event created until now
+                            fadeOutRemainingFromFull =
+                                remaining (timeDiff followingEvent.time timeline.now) duration
+
+                            actualFadeOutRemaining =
+                                fadeOutRemainingFromFull - (1 - fadeInRemaining)
+                        in
+                        if actualFadeOutRemaining > 0 then
+                            Just <| Transitioning (Just event.value) Nothing actualFadeOutRemaining
+
+                        else
+                            Nothing
+                    )
+                |> List.reverse
             )
-        |> listUntilInclusive isAt
-        |> Debug.log "transitions"
 
 
 {-| Turns a `Timeline (List a)` to a `List (Timeline (Maybe a))`.

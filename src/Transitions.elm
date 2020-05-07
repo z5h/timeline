@@ -137,8 +137,8 @@ flourishAttributes { flourish, duration, progress, flipFlop } =
     ]
 
 
-crossfadeAttributes : { progress : Float, duration : Int, flipFlop : Int } -> List (Html.Attribute msg)
-crossfadeAttributes { duration, progress, flipFlop } =
+crossfadeAttributes : { progress : Float, duration : Int, flipFlop : Int, forward : Bool } -> List (Html.Attribute msg)
+crossfadeAttributes { duration, progress, flipFlop, forward } =
     let
         delay =
             "-" ++ (String.fromFloat <| (1.0 - progress) * toFloat duration) ++ "ms"
@@ -146,11 +146,18 @@ crossfadeAttributes { duration, progress, flipFlop } =
         name =
             crossfadeName Crossfade
     in
-    [ Html.Attributes.style "animation-delay" delay
+    [ Html.Attributes.style "position" "absolute"
+    , Html.Attributes.style "animation-delay" delay
     , Html.Attributes.style "animation-name" (name |> animatedName flipFlop)
-    , Html.Attributes.style "animation-direction" "forwards"
+    , Html.Attributes.style "animation-direction"
+        (if forward then
+            "forwards"
+
+         else
+            "reverse"
+        )
     , Html.Attributes.style "animation-fill-mode" "forwards"
-    , Html.Attributes.style "animation-timing-function" niceBezierString
+    , Html.Attributes.style "animation-timing-function" "cubic-bezier(0,.75,.26,1   )"
     , Html.Attributes.style "animation-duration" (String.fromInt duration ++ "ms")
 
     --, Html.Attributes.style "animation-timing-function" niceBezierString
@@ -250,41 +257,99 @@ crossfadeNode :
     -> Html msg
 crossfadeNode node duration timeline attributes childView =
     let
-        statusList =
+        ( topStatus, remainingStatuses ) =
             timeline
                 |> Discrete.Timeline.transitions duration
-                |> List.map Discrete.Status.toTimelineStatus
-    in
-    statusList
-        |> List.map
-            (\status ->
-                case status of
-                    Timeline.At at ->
-                        Html.div
-                            [ Html.Attributes.style "position" "absolute"
-                            , Html.Attributes.style "left" "0"
-                            , Html.Attributes.style "top" "0"
-                            ]
-                            (childView at)
+                |> (\( top, remaining ) ->
+                        ( Discrete.Status.toTimelineStatus top
+                        , List.map Discrete.Status.toTimelineStatus remaining
+                        )
+                   )
 
-                    Timeline.Transitioning from to f ->
-                        let
-                            flipFlop =
-                                timeline |> Discrete.Timeline.unwrap |> .flipFlop
+        flipFlop =
+            timeline |> Discrete.Timeline.unwrap |> .flipFlop
 
-                            allAttributes =
-                                crossfadeAttributes { duration = duration, progress = f, flipFlop = flipFlop }
-                        in
-                        Html.div
-                            (allAttributes
-                                ++ [ Html.Attributes.style "position" "absolute"
-                                   , Html.Attributes.style "left" "0"
-                                   , Html.Attributes.style "top" "0"
-                                   ]
-                            )
+        transitionView : Maybe t -> Maybe t -> Float -> Maybe (Html msg)
+        transitionView maybeFrom maybeTo f =
+            case ( maybeFrom, maybeTo ) of
+                ( Nothing, Nothing ) ->
+                    Nothing
+
+                ( _, Just to ) ->
+                    Just
+                        (Html.div
+                            (crossfadeAttributes { duration = duration, progress = f, flipFlop = flipFlop, forward = True })
                             (childView to)
-            )
-        |> Html.node node (attributes ++ [ Html.Attributes.style "position" "relative" ])
+                        )
+
+                ( Just from, Nothing ) ->
+                    Just
+                        (Html.div
+                            (crossfadeAttributes { duration = duration, progress = f, flipFlop = flipFlop, forward = False })
+                            (childView from)
+                        )
+    in
+    Html.node node
+        (attributes ++ [ Html.Attributes.style "position" "relative" ])
+        ((case topStatus of
+            Timeline.At (Just at) ->
+                [ Html.div [ Html.Attributes.style "position" "absolute" ]
+                    (childView at)
+                ]
+
+            Timeline.Transitioning _ (Just to) f ->
+                transitionView Nothing (Just to) f
+                    |> Maybe.map List.singleton
+                    |> Maybe.withDefault []
+
+            _ ->
+                []
+         )
+            ++ (remainingStatuses
+                    |> List.filterMap
+                        (\remainingStatus ->
+                            case remainingStatus of
+                                Timeline.Transitioning from to f ->
+                                    transitionView from to f
+
+                                Timeline.At _ ->
+                                    Nothing
+                        )
+               )
+        )
+
+
+
+--statusList
+--    |> List.map
+--        (\status ->
+--            case status of
+--                Timeline.At at ->
+--                    Html.div
+--                        [ Html.Attributes.style "position" "absolute"
+--                        , Html.Attributes.style "left" "0"
+--                        , Html.Attributes.style "top" "0"
+--                        ]
+--                        (childView at)
+--
+--                Timeline.Transitioning from to f ->
+--                    let
+--                        flipFlop =
+--                            timeline |> Discrete.Timeline.unwrap |> .flipFlop
+--
+--                        allAttributes =
+--                            crossfadeAttributes { duration = duration, progress = f, flipFlop = flipFlop }
+--                    in
+--                    Html.div
+--                        (allAttributes
+--                            ++ [ Html.Attributes.style "position" "absolute"
+--                               , Html.Attributes.style "left" "0"
+--                               , Html.Attributes.style "top" "0"
+--                               ]
+--                        )
+--                        (childView to)
+--        )
+--    |> Html.node node (attributes ++ [ Html.Attributes.style "position" "relative" ])
 
 
 classes : List String -> Html.Attribute msg

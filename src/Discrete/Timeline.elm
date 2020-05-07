@@ -372,11 +372,15 @@ transition playback duration timeline =
         |> Discrete.Status.fromTimelineStatus
 
 
-transitions : Int -> Timeline t -> List (Status t)
+transitions : Int -> Timeline t -> ( Status (Maybe t), List (Status (Maybe t)) )
 transitions duration =
     unwrap
         >> Timeline.transitions duration
-        >> List.map Discrete.Status.fromTimelineStatus
+        >> (\( first, rest ) ->
+                ( Discrete.Status.fromTimelineStatus first
+                , List.map Discrete.Status.fromTimelineStatus rest
+                )
+           )
 
 
 type Playback

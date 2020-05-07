@@ -68,20 +68,20 @@ listFind pred list =
             Nothing
 
 
-listPairs : List a -> List ( a, Maybe a )
+listPairs : List a -> List ( a, a )
 listPairs =
     let
-        listPairsHelper : List ( a, Maybe a ) -> List a -> List ( a, Maybe a )
+        listPairsHelper : List ( a, a ) -> List a -> List ( a, a )
         listPairsHelper reversedResult list =
             case list of
                 [] ->
                     reversedResult
 
                 a :: [] ->
-                    ( a, Nothing ) :: reversedResult
+                    reversedResult
 
                 a :: b :: rest ->
-                    listPairsHelper (( a, Just b ) :: reversedResult) (b :: rest)
+                    listPairsHelper (( a, b ) :: reversedResult) (b :: rest)
     in
     listPairsHelper [] >> List.reverse
 
@@ -240,12 +240,8 @@ keyframes =
 
 /*=== crossfade ===*/
 @keyframes z5h_timeline__crossfade__### {
-    from { opacity: 0;
-    background-color: white
-    }
-    to   { opacity: 1;
-    background-color: white
-    }
+    from { opacity: 0 }
+    to   { opacity: 1 }
 }
 
 """
