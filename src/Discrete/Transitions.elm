@@ -52,6 +52,10 @@ type Toggle
     | SlideInFromBottom
     | Rotate90
     | Rotate180
+    | Rotate360
+    | RotateNeg90
+    | RotateNeg180
+    | RotateNeg360
 
 
 {-| Animate a Flourish anytime a timeline value changes.
@@ -97,6 +101,18 @@ toggleName entrance =
 
                 Rotate180 ->
                     "rotate_180"
+
+                Rotate360 ->
+                    "rotate_360"
+
+                RotateNeg90 ->
+                    "rotate_neg90"
+
+                RotateNeg180 ->
+                    "rotate_neg180"
+
+                RotateNeg360 ->
+                    "rotate_neg360"
            )
 
 
@@ -223,7 +239,13 @@ crossfadeAttributes { duration, progress, flipFlop, forward } =
             "reverse"
         )
     , Html.Attributes.style "animation-fill-mode" "forwards"
-    , Html.Attributes.style "animation-timing-function" "linear"
+    , Html.Attributes.style "animation-timing-function"
+        (if forward then
+            "ease-out"
+
+         else
+            "ease-in"
+        )
     , Html.Attributes.style "animation-duration" (String.fromInt duration ++ "ms")
 
     --, Html.Attributes.style "animation-timing-function" niceBezierString

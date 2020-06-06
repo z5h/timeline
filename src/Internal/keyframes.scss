@@ -103,8 +103,10 @@
 $rotations:
         "90" 90deg,
         "180" 180deg,
+        "360" 360deg,
         "neg90" -90deg,
-        "neg180" -180deg;
+        "neg180" -180deg,
+        "neg360" -360deg;
 
 @mixin rotation($name, $degrees){
   /*=== rotate_#{$name} ===*/
