@@ -1,10 +1,9 @@
 module Timeline exposing
     ( Timeline, Msg, Status(..)
     , init, update, subscriptions, view, viewDocument, msg
-    , value, transition, map, withDefault, sequence
-    , currentTime
+    , value, map, Interrupt(..), transition, transitions, withDefault, sequence, definitely, ease
+    , currentTime, bezier
     , push
-    , Playback(..), definitely, ease, transitions
     )
 
 {-|
@@ -36,19 +35,19 @@ state from a previous one, you can use the transition factor to do animations.
 @docs Timeline, Msg, Status
 
 
-# Integration helpers
+# Setup and integration helpers
 
 @docs init, update, subscriptions, view, viewDocument, msg
 
 
 # Rendering and animating during view
 
-@docs value, transition, map, withDefault, sequence
+@docs value, map, Interrupt, transition, transitions, withDefault, sequence, definitely, ease
 
 
 # Utility
 
-@docs currentTime
+@docs currentTime, bezier
 
 
 # Other
@@ -66,18 +65,15 @@ import Internal.Util exposing (..)
 import Time exposing (Posix)
 
 
-
--- Stuff
---
-
-
-type alias Event t =
-    { time : Posix, value : t }
+{-| A Timeline Event is a timestamped model value.
+-}
+type alias Event m =
+    { time : Posix, value : m }
 
 
 {-| Map the value part of an event.
 -}
-mapEvent : (t -> s) -> Event t -> Event s
+mapEvent : (a -> b) -> Event a -> Event b
 mapEvent f e =
     Event e.time (f e.value)
 
@@ -95,10 +91,15 @@ flip bit =
         1
 
 
-{-| A timeline of your model's history.
-History is only held long enough to ensure smooth transitions,
-based on the maximum transition duration value supplied to `init`.
+{-| A timeline of the history of your model.
+Given a timeline, and a value to animate, we can generate a continuous
+transition.
+
+Note that history is only held long enough to ensure smooth transitions,
+based on the maximum transition duration value supplied to `init`. Older
+values stored in timeline will be automatically discarded when not needed.
 You never need to create these directly.
+
 -}
 type alias Timeline t =
     { current : Event t
@@ -119,8 +120,8 @@ longAgo =
 Updated internally via `Browser.Events.onAnimationFrame`, thus inheriting its
 resolution.
 
-Having this prevents the need from tracking a high resolution time value in your model,
-because doing such a thing would prohibit use of Timeline due to GC issues.
+Having this prevents the need from tracking a high resolution time value in your
+model.
 
 -}
 currentTime : Timeline t -> Posix
@@ -140,23 +141,11 @@ type Msg m
     limit =
         500
 
-    now =
-        Time.millisToPosix 0
-
     timelineInit =
-        \flags -> myInit flags |> Timeline.init limit now
+        \flags -> myInit flags |> Timeline.init limit
 
-The `limit` parameter is the duration your longest animation (transition) will take.
-This helps Timeline know when to throw away history it no longer needs.
-When you do `timeline |> Timeline.transition 500` you are creating a 500ms transition.
-If that's the longest transition in your app, then `limit` in `init` should be `500`.
-
-The `now` parameter will become the timestamp for the initial model state.
-It's perfectly safe to set this to any time in history (e.g. `Time.millisToPosix 0`).
-The only caveat is if you later inquire how long a state has been at rest, you won't
-get a correct answer for your initial state. This probably doesn't matter in
-most use cases. But seeing as you can animate a static state based on it's age,
-this is important to know.
+The `limit` parameter is the duration your longest animation (transition) will
+take. This helps Timeline know when to throw away history it no longer needs.
 
 -}
 init : Int -> ( model, Cmd msg ) -> ( Timeline model, Cmd (Msg msg) )
@@ -222,6 +211,8 @@ subscriptions subscriptions_ timeline =
 Converts your `view : Timeline model -> Html msg` to
 a `Timeline model -> Html (Timeline.Msg msg)` for use in your `main`.
 
+See Basic Setup.
+
 -}
 view : (Timeline model -> Html msg) -> (Timeline model -> Html (Msg msg))
 view view_ timeline_ =
@@ -237,10 +228,6 @@ view view_ timeline_ =
 
 
 lazyView current history limit timestamp flipFlop view_ =
-    let
-        _ =
-            Debug.log "Lazy" "View"
-    in
     view_ (Timeline current history limit timestamp timestamp flipFlop)
 
 
@@ -249,6 +236,8 @@ lazyView current history limit timestamp flipFlop view_ =
 Converts your `view : Timeline model -> Browser.Document msg` to
 a `Timeline model -> Browser.Document (Timeline.Msg msg)` for use in your
 `main`.
+
+See Basic Setup.
 
 -}
 viewDocument : (Timeline model -> Browser.Document msg) -> (Timeline model -> Browser.Document (Msg msg))
@@ -313,13 +302,28 @@ push e timeline =
 
 
 {-| Extract the current (most recent) value from the timeline.
+
+At any point in your view code that doesn't need animations, simply retrieve the
+current timeline value and proceed rendering the view as you previously would.
+
+E.g. as a first step in integrating Timeline into your code, simply render your
+existing view code:
+
+    view : Timeline Model -> Html Msg
+    view timeline =
+        let
+            model =
+                Timeline.value timeline
+        in
+        ... -- your existing view code as it used to work using model
+
 -}
 value : Timeline t -> t
 value =
     .current >> .value
 
 
-{-| Maps a timeline. **Very importantly** the new timeline can have a different change history.
+{-| Maps a timeline. **Very importantly** the new timeline has it's own history.
 
 If
 
@@ -350,7 +354,13 @@ map f { current, history, now, limit, flipFlop, key } =
             mapEvent f
 
         initial =
-            { current = mapf first, history = [], now = longAgo, key = longAgo, limit = limit, flipFlop = 0 }
+            { current = mapf first
+            , history = []
+            , now = longAgo
+            , key = longAgo
+            , limit = limit
+            , flipFlop = 0
+            }
     in
     List.foldl
         (\e t -> push (mapf e) t)
@@ -359,6 +369,9 @@ map f { current, history, now, limit, flipFlop, key } =
         |> (\timeline -> { timeline | now = now, key = key, flipFlop = flipFlop })
 
 
+{-| Extract the `Just` values from a Timeline of Maybes. In the case where
+the input Timeline has no `Just` values, a `Nothing` is returned.
+-}
 definitely : Timeline (Maybe t) -> Maybe (Timeline t)
 definitely { current, history, now, limit, flipFlop, key } =
     current
@@ -372,20 +385,32 @@ definitely { current, history, now, limit, flipFlop, key } =
                     first :: rest ->
                         let
                             initial =
-                                { current = first, history = [], now = longAgo, key = longAgo, limit = limit, flipFlop = 0 }
+                                { current = first
+                                , history = []
+                                , now = longAgo
+                                , key = longAgo
+                                , limit = limit
+                                , flipFlop = 0
+                                }
                         in
                         Just <|
                             (List.foldl
                                 (\e t -> push e t)
                                 initial
                                 rest
-                                |> (\timeline -> { timeline | now = now, key = key, flipFlop = flipFlop })
+                                |> (\timeline ->
+                                        { timeline
+                                            | now = now
+                                            , key = key
+                                            , flipFlop = flipFlop
+                                        }
+                                   )
                             )
            )
 
 
-{-| This is for treating non-continuous Timelines as continuous. Usually occurs
-when mapping your model (and hence Timeline) can result in unwanted maybes.
+{-| This is for treating non-continuous Timelines as continuous.
+Consider this typical example:
 
 e.g.
 
@@ -399,13 +424,16 @@ e.g.
         = PageA PageAModel
         | PageB PageBModel
 
-Here, the state of the page models are not continuous. They don't always exist.
-Elm's type system will remind us that we cannot animate a thing that might not exist.
+Here, the state of the page models are not continuous as viewed form the top
+level. They don't always exist.
+Elm's type system will remind us that we cannot animate a thing that might not
+exist.
 
 To animate `PageA` and `PageB` views, the following is required:
 
-1.  have functions to extract `Maybe Page?Model` values from `Model`
-2.  create a timeline of Maybe values and use withDefault
+1.  functions that extract `Maybe PageAModel` and `Maybe PageBModel`
+    values from `Model`
+2.  create a timeline of `Maybe` values and use `withDefault`
 
 e.g.
 
@@ -477,13 +505,14 @@ maybeEvent event =
             Nothing
 
 
-{-| A transition status. Either `At` a value for a specific number of milliseconds,
+{-| A transition status.
+
+Either `At` a value,
 or `Transitioning` from one value to another, with a "remaining" float value.
 
 Note that during a transition, the float value goes from `1.0 -> 0.0`.
-The "remaining" float value returned is not linear, but a dampened-spring
-eased value. Use it directly (with a multiplier) to fade, scale, translate
-with a natural and pleasant effect.
+Use that number (with a multiplier or easing function) to fade, scale,
+translate, etc.
 
 -}
 type Status t
@@ -491,68 +520,90 @@ type Status t
     | Transitioning t t Float
 
 
-isAt : Status t -> Bool
-isAt status =
-    case status of
-        At _ ->
-            True
-
-        _ ->
-            False
-
-
-ease : Status t -> Status t
-ease status =
+{-| Applies an easing function to a Status.
+An easing function should ensure 0 -> 0, 1 -> 1, and should be continuous.
+-}
+ease : (Float -> Float) -> Status t -> Status t
+ease easingFunction status =
     case status of
         At t ->
             At t
 
         Transitioning t0 t1 f ->
-            Transitioning t0 t1 (niceBezier f)
+            Transitioning t0 t1 (easingFunction f)
 
 
 {-| Given a duration for how long a transition on a timeline takes,
 what's the status of our timeline?
 Are we transitioning between values, or statically at a value?
 
+Any uninterrupted transition will be equivalent regardless of the interrupt
+mode. Interrupted transitions will behave differently. See `Interrupt`.
+
+Here we want to generate transitions to animate a menu. If a transition is
+interrupted, we want to reverse progress.
+
     let
-    hamburgerMenuStatus =
+    menuStatus =
         modelTimeline
-        |> Timeline.map .hamburgerMenuState
-        |> transition 300
+        |> Timeline.map .menuState
+        |> transition 300 {interrupt = Reverse}
     in
-        case hamburgerMenuState of
-            At state t ->
+        case menuStatus of
+            At state ->
                 -- our menu is fully open/closed, and has been for `t` ms
 
             Transitioning from to remaining ->
                 -- our menu is transitioning.
                 -- `remaining` goes `1.0 -> 0.0` as `from -> to`
 
-The `remaining` float value returned is not linear, but a dampened-spring
-eased value. Use it directly (with a multiplier) to fade, scale, translate
-with a natural and pleasant effect.
+-}
+transition : Int -> { interrupt : Interrupt } -> Timeline t -> Status t
+transition duration { interrupt } timeline =
+    case interrupt of
+        Reverse ->
+            trackingTransitionHelper
+                False
+                timeline.now
+                duration
+                timeline.current
+                timeline.history
+
+        Restart ->
+            interruptibleTransitionHelper
+                timeline.now
+                duration
+                timeline.current
+                timeline.history
+
+        Peak ->
+            trackingTransitionHelper
+                True
+                timeline.now
+                duration
+                timeline.current
+                timeline.history
+
+
+{-|
+
+    A Timeline represents the (possibly interrupted) transitions of a value.
+    E.g. `A` to `B` to `C`.
+    The status of such a timeline's transition will either be
+    `Transitioning B C f`, or `At C`.
+
+    Another way of way of viewing this, is each value is it's own transition:
+
+        Just A to Nothing
+        Just B to Nothing
+        Nothing to Just C
+
+    That is, at some point we had an A, a B but they are transitioning away.
+    And we have the appearance of a C.
+
+    This function gives us that perspective. The result is a non-empty list.
 
 -}
-transition : Playback -> Int -> Timeline t -> Status t
-transition playback duration timeline =
-    case playback of
-        Reversible ->
-            reversibleTransitionHelper False timeline.now duration timeline.current timeline.history
-
-        Interruptible ->
-            interruptibleTransitionHelper timeline.now duration timeline.current timeline.history
-
-        Restartable ->
-            reversibleTransitionHelper True timeline.now duration timeline.current timeline.history
-
-
-type Playback
-    = Reversible
-    | Interruptible
-    | Restartable
-
-
 transitions : Int -> Timeline t -> ( Status (Maybe t), List (Status (Maybe t)) )
 transitions duration timeline =
     case timeline.history of
@@ -583,7 +634,8 @@ transitions duration timeline =
                                 remaining (timeDiff followingEvent.time timeline.now) duration
 
                             actualFadeOutRemaining =
-                                fadeOutRemainingFromFull - (1 - fadeInRemaining)
+                                fadeOutRemainingFromFull
+                                    - fadeInRemaining
                         in
                         if actualFadeOutRemaining > 0 then
                             Just <| Transitioning (Just event.value) Nothing actualFadeOutRemaining
@@ -593,6 +645,28 @@ transitions duration timeline =
                     )
                 |> List.reverse
             )
+
+
+{-| Interrupt.
+
+Interrupt values tell transition generator how do deal with interrupted
+transitions.
+
+  - `Reverse`: this is useful when state changes are between 2 values, and
+    animations have a reversible quality. (e.g. toggling an opening menu in progress).
+    If the opening of a menu has value `Transitioning Closed Open 0.9`, then it has %90 of it's transition remaining.
+    A model change from (Open to Closed) will, when transitioned with `Reverse`, have a value of
+    `Transitioning Open Closed 0.1`.
+  - `Restart`: this is for simply restarting an animation upon interruption.
+  - `Peak`: this is useful for an animation that goes to a peak value and ends where it started.
+    E.g. "Pulse" or "Flash" style animation. If interrupted, and the has not been reached, the transition will simply
+    continue on. If interrupted and the peak has already been reached, the transition will reverse to "peak" again.
+
+-}
+type Interrupt
+    = Reverse
+    | Restart
+    | Peak
 
 
 {-| Turns a `Timeline (List a)` to a `List (Timeline (Maybe a))`.
@@ -726,24 +800,6 @@ sequence id timeline =
         |> List.map (\t -> { t | now = timeline.now, flipFlop = timeline.flipFlop })
 
 
-
---transitionsHelper : Posix -> Int -> Event t -> List (Event t) -> List (Status t)
---transitionsHelper now duration e events =
---        case events of
---            [] ->
---                [At e.value]
---
---            prev :: [] ->
---                remaining (timeDiff now e.time) duration
---                    |> (\remaining_ ->
---                            if remaining_ == 0 then
---                                At e.value
---
---                            else
---                                Transitioning prev.value e.value remaining_
---                       )
-
-
 interruptibleTransitionHelper : Posix -> Int -> Event t -> List (Event t) -> Status t
 interruptibleTransitionHelper now duration e events =
     case events of
@@ -761,8 +817,8 @@ interruptibleTransitionHelper now duration e events =
                    )
 
 
-reversibleTransitionHelper : Bool -> Posix -> Int -> Event t -> List (Event t) -> Status t
-reversibleTransitionHelper maximize now duration e events =
+trackingTransitionHelper : Bool -> Posix -> Int -> Event t -> List (Event t) -> Status t
+trackingTransitionHelper maximize now duration e events =
     case events of
         [] ->
             At e.value
@@ -780,7 +836,7 @@ reversibleTransitionHelper maximize now duration e events =
         prev :: rest ->
             let
                 midTransition =
-                    reversibleTransitionHelper maximize e.time duration prev rest
+                    trackingTransitionHelper maximize e.time duration prev rest
             in
             case midTransition of
                 At prevValue ->
@@ -825,13 +881,13 @@ remaining complete duration =
         1.0 - toFloat complete / toFloat duration
 
 
-niceBezier : Float -> Float
-niceBezier f =
-    bezier 0.78 0 0.22 1 f
+{-| Generate a bezier easing function.
 
+`(x0, y0)` and `(x3, y3)` are hardcoded to `(0, 0)` and `(1,1)` respectively.
 
-bezier : Float -> Float -> Float -> Float -> Float -> Float
-bezier x1 y1 x2 y2 time =
+-}
+bezier : { x : Float, y : Float } -> { x : Float, y : Float } -> Float -> Float
+bezier p1 p2 t =
     let
         lerp from to v =
             from + (to - from) * v
@@ -845,7 +901,7 @@ bezier x1 y1 x2 y2 time =
                     y
 
                 xs ->
-                    List.map2 (\x y -> pair lerp x y time) xs (Maybe.withDefault [] (List.tail xs))
+                    List.map2 (\x y -> pair lerp x y t) xs (Maybe.withDefault [] (List.tail xs))
                         |> casteljau
     in
-    casteljau [ ( 0, 0 ), ( x1, y1 ), ( x2, y2 ), ( 1, 1 ) ]
+    casteljau [ ( 0, 0 ), ( p1.x, p1.y ), ( p2.x, p2.y ), ( 1, 1 ) ]

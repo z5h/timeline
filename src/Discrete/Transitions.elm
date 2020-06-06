@@ -1,4 +1,22 @@
-module Transitions exposing (..)
+module Discrete.Transitions exposing
+    ( Flourish(..)
+    , Reveal(..)
+    , Toggle(..)
+    , crossfadeNode
+    , flourishNode
+    , revealNode
+    , toggleNode
+    )
+
+{-|
+
+    @docs revealNode, Reveal
+
+    @docs flourishNode, Flourish
+
+    @docs crossfadeNode, Crossfade
+
+-}
 
 import Discrete.Status
 import Discrete.Timeline
@@ -8,42 +26,46 @@ import Internal.Util exposing (..)
 import Timeline as Timeline
 
 
+{-| For Timelines who's values alternate between `Nothing` and `Just` values.
 
--- We didn't have a value, now we do, or vice versa
--- Nothing -> Just a
--- We have a value, but we're hiding it, then showing
+Used to animate something appearing and disappearing form view. Accordingly,
+the animation fades and scales to/from nothing.
 
-
+-}
 type Reveal
-    = FadeIn
+    = ScaleIn
     | ScaleInX
     | ScaleInY
-    | SlideInFromLeft
+
+
+{-| Animate a toggle from a `Timeline Bool`.
+
+SlideInFromXXX toggles are useful for animating a slide-in menu.
+
+RotateXXX are useful for animating
+
+-}
+type Toggle
+    = SlideInFromLeft
     | SlideInFromTop
     | SlideInFromRight
     | SlideInFromBottom
+    | Rotate90
+    | Rotate180
 
 
+{-| Animate a Flourish anytime a timeline value changes.
+-}
 type Flourish
     = Pulse
     | Flash
-
-
-type Crossfade
-    = Crossfade
 
 
 revealName : Reveal -> String
 revealName reveal =
     "z5h_timeline__"
         ++ (case reveal of
-                SlideInFromLeft ->
-                    "slide_in_from_left"
-
-                SlideInFromRight ->
-                    "slide_in_from_right"
-
-                FadeIn ->
+                ScaleIn ->
                     "fade_in"
 
                 ScaleInX ->
@@ -51,9 +73,30 @@ revealName reveal =
 
                 ScaleInY ->
                     "scale_in_y"
+           )
 
-                _ ->
-                    "xxx"
+
+toggleName : Toggle -> String
+toggleName entrance =
+    "z5h_timeline__"
+        ++ (case entrance of
+                SlideInFromLeft ->
+                    "slide_in_from_left"
+
+                SlideInFromTop ->
+                    "slide_in_from_top"
+
+                SlideInFromRight ->
+                    "slide_in_from_right"
+
+                SlideInFromBottom ->
+                    "slide_in_from_bottom"
+
+                Rotate90 ->
+                    "rotate_90"
+
+                Rotate180 ->
+                    "rotate_180"
            )
 
 
@@ -69,15 +112,6 @@ flourishName flourish =
            )
 
 
-crossfadeName : Crossfade -> String
-crossfadeName crossfade =
-    "z5h_timeline__"
-        ++ (case crossfade of
-                Crossfade ->
-                    "crossfade"
-           )
-
-
 animatedName : Int -> String -> String
 animatedName flipFlop name =
     name ++ "__" ++ String.fromInt flipFlop
@@ -88,8 +122,18 @@ unrevealedAttributes reveal =
     [ classes [ revealName reveal, "start" ] ]
 
 
-revealAttributes : { reveal : Reveal, revealing : Bool, progress : Float, duration : Int, flipFlop : Int } -> List (Html.Attribute msg)
-revealAttributes { reveal, revealing, duration, progress, flipFlop } =
+toggleEndAttributes : Toggle -> List (Html.Attribute msg)
+toggleEndAttributes toggle =
+    [ classes [ toggleName toggle, "end" ] ]
+
+
+toggleStartAttributes : Toggle -> List (Html.Attribute msg)
+toggleStartAttributes toggle =
+    [ classes [ toggleName toggle, "start" ] ]
+
+
+revealAttributes : { reveal : Reveal, forward : Bool, progress : Float, duration : Int, flipFlop : Int } -> List (Html.Attribute msg)
+revealAttributes { reveal, forward, duration, progress, flipFlop } =
     let
         delay =
             "-" ++ (String.fromFloat <| (1.0 - progress) * toFloat duration) ++ "ms"
@@ -100,7 +144,7 @@ revealAttributes { reveal, revealing, duration, progress, flipFlop } =
     [ Html.Attributes.style "animation-delay" delay
     , Html.Attributes.style "animation-name" (name |> animatedName flipFlop)
     , Html.Attributes.style "animation-direction"
-        (if revealing then
+        (if forward then
             "normal"
 
          else
@@ -119,9 +163,6 @@ flourishAttributes { flourish, duration, progress, flipFlop } =
         delay =
             "-" ++ (String.fromFloat <| (1.0 - progress) * toFloat duration) ++ "ms"
 
-        _ =
-            Debug.log "delaying" delay
-
         name =
             flourishName flourish
     in
@@ -137,6 +178,31 @@ flourishAttributes { flourish, duration, progress, flipFlop } =
     ]
 
 
+toggleAttributes : { toggle : Toggle, forward : Bool, progress : Float, duration : Int, flipFlop : Int } -> List (Html.Attribute msg)
+toggleAttributes { toggle, duration, forward, progress, flipFlop } =
+    let
+        delay =
+            "-" ++ (String.fromFloat <| (1.0 - progress) * toFloat duration) ++ "ms"
+
+        name =
+            toggleName toggle
+    in
+    [ Html.Attributes.style "animation-delay" delay
+    , Html.Attributes.style "animation-name" (name |> animatedName flipFlop)
+    , Html.Attributes.style "animation-direction"
+        (if forward then
+            "normal"
+
+         else
+            "reverse"
+        )
+    , Html.Attributes.style "animation-fill-mode" "forwards"
+    , Html.Attributes.style "animation-duration" (String.fromInt duration ++ "ms")
+    , Html.Attributes.style "animation-timing-function" niceBezierString
+    , classes [ name, "in-progress" ]
+    ]
+
+
 crossfadeAttributes : { progress : Float, duration : Int, flipFlop : Int, forward : Bool } -> List (Html.Attribute msg)
 crossfadeAttributes { duration, progress, flipFlop, forward } =
     let
@@ -144,7 +210,7 @@ crossfadeAttributes { duration, progress, flipFlop, forward } =
             "-" ++ (String.fromFloat <| (1.0 - progress) * toFloat duration) ++ "ms"
 
         name =
-            crossfadeName Crossfade
+            "z5h_timeline__crossfade"
     in
     [ Html.Attributes.style "position" "absolute"
     , Html.Attributes.style "animation-delay" delay
@@ -157,7 +223,7 @@ crossfadeAttributes { duration, progress, flipFlop, forward } =
             "reverse"
         )
     , Html.Attributes.style "animation-fill-mode" "forwards"
-    , Html.Attributes.style "animation-timing-function" "cubic-bezier(0,.75,.26,1   )"
+    , Html.Attributes.style "animation-timing-function" "linear"
     , Html.Attributes.style "animation-duration" (String.fromInt duration ++ "ms")
 
     --, Html.Attributes.style "animation-timing-function" niceBezierString
@@ -165,6 +231,42 @@ crossfadeAttributes { duration, progress, flipFlop, forward } =
     ]
 
 
+toggleNode :
+    String
+    -> { toggle : Toggle, duration : Int }
+    -> Discrete.Timeline.Timeline Bool
+    -> List (Html.Attribute msg)
+    -> List (Html msg)
+    -> Html msg
+toggleNode node { toggle, duration } timeline attributes childView =
+    let
+        status =
+            timeline
+                |> Discrete.Timeline.transition duration { interrupt = Discrete.Timeline.Reverse }
+                |> Discrete.Status.toTimelineStatus
+    in
+    case status of
+        Timeline.At True ->
+            Html.node node (toggleStartAttributes toggle ++ attributes) childView
+
+        Timeline.At False ->
+            Html.node node (toggleEndAttributes toggle ++ attributes) childView
+
+        Timeline.Transitioning _ forward f ->
+            let
+                flipFlop =
+                    timeline |> Discrete.Timeline.unwrap |> .flipFlop
+
+                allAttributes =
+                    toggleAttributes { toggle = toggle, forward = forward, duration = duration, progress = f, flipFlop = flipFlop }
+            in
+            Html.node node
+                (allAttributes ++ attributes)
+                childView
+
+
+{-| Render a node which will animate reveal transitions
+-}
 revealNode :
     String
     -> { reveal : Reveal, duration : Int }
@@ -177,7 +279,7 @@ revealNode node { reveal, duration } timeline attributes childView =
         revealedStatus =
             timeline
                 |> Discrete.Timeline.map ((/=) Nothing)
-                |> Discrete.Timeline.transition Discrete.Timeline.Reversible duration
+                |> Discrete.Timeline.transition duration { interrupt = Discrete.Timeline.Reverse }
                 |> Discrete.Status.toTimelineStatus
 
         maybeContentTimeline =
@@ -198,7 +300,7 @@ revealNode node { reveal, duration } timeline attributes childView =
                     timeline |> Discrete.Timeline.unwrap |> .flipFlop
 
                 allAttributes =
-                    revealAttributes { reveal = reveal, revealing = to, duration = duration, progress = f, flipFlop = flipFlop }
+                    revealAttributes { reveal = reveal, forward = to, duration = duration, progress = f, flipFlop = flipFlop }
             in
             Html.node node
                 (allAttributes ++ attributes)
@@ -217,6 +319,8 @@ revealNode node { reveal, duration } timeline attributes childView =
             Html.node node attributes []
 
 
+{-| Render a node which will animate flourish transitions
+-}
 flourishNode :
     String
     -> { flourish : Flourish, duration : Int }
@@ -228,7 +332,7 @@ flourishNode node { flourish, duration } timeline attributes childView =
     let
         status =
             timeline
-                |> Discrete.Timeline.transition Discrete.Timeline.Restartable duration
+                |> Discrete.Timeline.transition duration { interrupt = Discrete.Timeline.Peak }
                 |> Discrete.Status.toTimelineStatus
     in
     case status of
@@ -248,6 +352,8 @@ flourishNode node { flourish, duration } timeline attributes childView =
                 childView
 
 
+{-| Render a node which will animate crossfade transitions
+-}
 crossfadeNode :
     String
     -> Int
@@ -319,48 +425,6 @@ crossfadeNode node duration timeline attributes childView =
         )
 
 
-
---statusList
---    |> List.map
---        (\status ->
---            case status of
---                Timeline.At at ->
---                    Html.div
---                        [ Html.Attributes.style "position" "absolute"
---                        , Html.Attributes.style "left" "0"
---                        , Html.Attributes.style "top" "0"
---                        ]
---                        (childView at)
---
---                Timeline.Transitioning from to f ->
---                    let
---                        flipFlop =
---                            timeline |> Discrete.Timeline.unwrap |> .flipFlop
---
---                        allAttributes =
---                            crossfadeAttributes { duration = duration, progress = f, flipFlop = flipFlop }
---                    in
---                    Html.div
---                        (allAttributes
---                            ++ [ Html.Attributes.style "position" "absolute"
---                               , Html.Attributes.style "left" "0"
---                               , Html.Attributes.style "top" "0"
---                               ]
---                        )
---                        (childView to)
---        )
---    |> Html.node node (attributes ++ [ Html.Attributes.style "position" "relative" ])
-
-
 classes : List String -> Html.Attribute msg
 classes list =
     list |> List.map (\l -> ( l, True )) |> Html.Attributes.classList
-
-
-
--- either there is something that changes and you want a repeatable flourish upon change
--- Flourish
--- or, something goes between Nothing and Just, in which case you want a nice way to appear/disappear
--- Appear
--- or a toggle between N (=2??) states.
--- Toggle

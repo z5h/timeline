@@ -1,10 +1,9 @@
 module Discrete.Timeline exposing
     ( Timeline, Msg, Status
     , init, update, subscriptions, view, viewDocument, msg
-    , value, transition, map, withDefault, sequence
+    , value, map, Interrupt(..), transition, transitions, withDefault, sequence, definitely
     , currentTime
-    , push
-    , Playback(..), css, definitely, transitions, unwrap
+    , push, unwrap
     )
 
 {-|
@@ -43,7 +42,7 @@ state from a previous one, you can use the transition factor to do animations.
 
 # Rendering and animating during view
 
-@docs value, transition, map, withDefault, sequence
+@docs value, map, Interrupt, transition, transitions, withDefault, sequence, definitely
 
 
 # Utility
@@ -53,7 +52,7 @@ state from a previous one, you can use the transition factor to do animations.
 
 # Other
 
-@docs push
+@docs push, unwrap
 
 -}
 
@@ -62,7 +61,7 @@ import Discrete.Status
 import Html exposing (Html)
 import Html.Attributes
 import Html.Lazy
-import Internal.Util exposing (..)
+import Internal.Keyframes exposing (keyframes)
 import Time exposing (Posix)
 import Timeline
 import Url
@@ -70,13 +69,6 @@ import Url
 
 type alias Event t =
     { time : Posix, value : t }
-
-
-{-| Map the value part of an event.
--}
-mapEvent : (t -> s) -> Event t -> Event s
-mapEvent f e =
-    Event e.time (f e.value)
 
 
 type alias Bit =
@@ -101,6 +93,9 @@ type Timeline t
     = Timeline (Timeline.Timeline t)
 
 
+{-| Discrete.Timeline is backed by an underlying Timeline, BUT semantics are different.
+This is exposed to implement transitions and likely not of interest otherwise.
+-}
 unwrap : Timeline t -> Timeline.Timeline t
 unwrap (Timeline timeline) =
     timeline
@@ -189,6 +184,14 @@ css string =
         []
 
 
+{-| Convenience function.
+
+Converts your `view : Timeline model -> Html msg` to
+a `Timeline model -> Html (Timeline.Msg msg)` for use in your `main`.
+
+See Basic Setup.
+
+-}
 view : (Timeline model -> Html msg) -> Timeline model -> Html (Msg msg)
 view view_ (Timeline timeline_) =
     Html.Lazy.lazy5 lazyRender
@@ -201,10 +204,6 @@ view view_ (Timeline timeline_) =
 
 
 lazyRender view_ current history limit flipFlop =
-    let
-        _ =
-            Debug.log "Lazy" "Render"
-    in
     Html.div []
         [ css keyframes
         , view_ (Timeline <| Timeline.Timeline current history limit current.time current.time flipFlop)
@@ -216,6 +215,8 @@ lazyRender view_ current history limit flipFlop =
 Converts your `view : Timeline model -> Browser.Document msg` to
 a `Timeline model -> Browser.Document (Timeline.Msg msg)` for use in your
 `main`.
+
+See Basic Setup.
 
 -}
 viewDocument : (Timeline model -> Browser.Document msg) -> Timeline model -> Browser.Document (Msg msg)
@@ -281,6 +282,9 @@ map f =
     unwrap >> Timeline.map f >> Timeline
 
 
+{-| Extract the `Just` values from a Timeline of Maybes. In the case where
+the input Timeline has no `Just` values, a `Nothing` is returned.
+-}
 definitely : Timeline (Maybe t) -> Maybe (Timeline t)
 definitely =
     unwrap >> Timeline.definitely >> Maybe.map Timeline
@@ -364,14 +368,58 @@ type alias Status t =
     Discrete.Status.Status t
 
 
-transition : Playback -> Int -> Timeline t -> Status t
-transition playback duration timeline =
+{-| Given a duration for how long a transition on a timeline takes,
+what's the status of our timeline?
+Are we transitioning between values, or statically at a value?
+
+Any uninterrupted transition will be equivalent regardless of the interrupt
+mode. Interrupted transitions will behave differently. See `Interrupt`.
+
+Here we want to generate transitions to animate a menu. If a transition is
+interrupted, we want to reverse progress.
+
+    let
+    menuStatus =
+        modelTimeline
+        |> Timeline.map .menuState
+        |> transition 300 {interrupt = Reverse}
+    in
+        case menuStatus of
+            At state ->
+                -- our menu is fully open/closed, and has been for `t` ms
+
+            Transitioning from to remaining ->
+                -- our menu is transitioning.
+                -- `remaining` goes `1.0 -> 0.0` as `from -> to`
+
+-}
+transition : Int -> { interrupt : Interrupt } -> Timeline t -> Status t
+transition duration { interrupt } timeline =
     timeline
         |> unwrap
-        |> Timeline.transition (playbackForTimeline playback) duration
+        |> Timeline.transition duration { interrupt = interruptForTimeline interrupt }
         |> Discrete.Status.fromTimelineStatus
 
 
+{-|
+
+    A Timeline represents the (possibly interrupted) transitions of a value.
+    E.g. `A` to `B` to `C`.
+    The status of such a timeline's transition will either be
+    `Transitioning B C f`, or `At C`.
+
+    Another way of way of viewing this, is each value is it's own transition:
+
+        Just A to Nothing
+        Just B to Nothing
+        Nothing to Just C
+
+    That is, at some point we had an A, a B but they are transitioning away.
+    And we have the appearance of a C.
+
+    This function gives us that perspective. The result is a non-empty list.
+
+-}
 transitions : Int -> Timeline t -> ( Status (Maybe t), List (Status (Maybe t)) )
 transitions duration =
     unwrap
@@ -383,23 +431,39 @@ transitions duration =
            )
 
 
-type Playback
-    = Reversible
-    | Interruptible
-    | Restartable
+{-| Interrupt.
+
+Interrupt values tell transition generator how do deal with interrupted
+transitions.
+
+  - `Reverse`: this is useful when state changes are between 2 values, and
+    animations have a reversible quality. (e.g. toggling an opening menu in progress).
+    If the opening of a menu has value `Transitioning Closed Open 0.9`, then it has %90 of it's transition remaining.
+    A model change from (Open to Closed) will, when transitioned with `Reverse`, have a value of
+    `Transitioning Open Closed 0.1`.
+  - `Restart`: this is for simply restarting an animation upon interruption.
+  - `Peak`: this is useful for an animation that goes to a peak value and ends where it started.
+    E.g. "Pulse" or "Flash" style animation. If interrupted, and the has not been reached, the transition will simply
+    continue on. If interrupted and the peak has already been reached, the transition will reverse to "peak" again.
+
+-}
+type Interrupt
+    = Reverse
+    | Restart
+    | Peak
 
 
-playbackForTimeline : Playback -> Timeline.Playback
-playbackForTimeline p =
+interruptForTimeline : Interrupt -> Timeline.Interrupt
+interruptForTimeline p =
     case p of
-        Reversible ->
-            Timeline.Reversible
+        Reverse ->
+            Timeline.Reverse
 
-        Interruptible ->
-            Timeline.Interruptible
+        Restart ->
+            Timeline.Restart
 
-        Restartable ->
-            Timeline.Restartable
+        Peak ->
+            Timeline.Peak
 
 
 {-| Turns a `Timeline (List a)` to a `List (Timeline (Maybe a))`.
@@ -419,7 +483,3 @@ entry's index in the list as it's value changes over time.
 sequence : (a -> id) -> Timeline (List a) -> List (Timeline (Maybe a))
 sequence id =
     unwrap >> Timeline.sequence id >> List.map Timeline
-
-
-niceBezierString =
-    "cubic-bezier(0.78,0,0.22,1)"
