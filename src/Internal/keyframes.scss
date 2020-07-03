@@ -100,15 +100,14 @@
   }
 }
 
-$rotations:
-        "90" 90deg,
-        "180" 180deg,
-        "360" 360deg,
-        "neg90" -90deg,
-        "neg180" -180deg,
-        "neg360" -360deg;
+$rotations: "90" 90deg,
+"180" 180deg,
+"360" 360deg,
+"neg90" -90deg,
+"neg180" -180deg,
+"neg360" -360deg;
 
-@mixin rotation($name, $degrees){
+@mixin rotation($name, $degrees) {
   /*=== rotate_#{$name} ===*/
   .z5h_timeline__rotate_#{$name} {
     &.end {
@@ -119,7 +118,7 @@ $rotations:
   @each $bit in $bits {
     @keyframes z5h_timeline__rotate_#{$name}__#{$bit} {
       from {
-        transform:rotate($degrees);
+        transform: rotate($degrees);
       }
       to {
         transform: rotate(0);
@@ -129,11 +128,9 @@ $rotations:
 
 }
 
-@each $name, $degrees in $rotations{
+@each $name, $degrees in $rotations {
   @include rotation($name, $degrees);
 }
-
-
 
 
 @mixin slide_in_from($name, $translate, $distance) {
@@ -155,11 +152,10 @@ $rotations:
   }
 }
 
-$slide_ins:
-        "left" translateX -100%,
-        "right" translateX 100%,
-        "top" translateY -100%,
-        "bottom" translateY 100%;
+$slide_ins: "left" translateX -100%,
+"right" translateX 100%,
+"top" translateY -100%,
+"bottom" translateY 100%;
 
 @each $name, $translate, $distance in $slide_ins {
   @include slide_in_from($name, $translate, $distance);
@@ -172,7 +168,7 @@ $slide_ins:
       transform: scale3d(1, 1, 1);
     }
     50% {
-      transform: scale3d(1.05, 1.05, 1.05);
+      transform: scale3d(1.1, 1.1, 1.1);
     }
     to {
       transform: scale3d(1, 1, 1);
@@ -183,11 +179,14 @@ $slide_ins:
 /*=== flash ===*/
 @each $bit in $bits {
   @keyframes z5h_timeline__flash__#{$bit} {
-    from, 50%, to {
+    from {
       opacity: 1
     }
-    25%, 75% {
+    50% {
       opacity: 0
+    }
+    to {
+      opacity: 1
     }
   }
 }

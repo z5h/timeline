@@ -12,6 +12,8 @@ module Discrete.Transitions exposing
 
     @docs revealNode, Reveal
 
+    @docs toggleNode, Reveal
+
     @docs flourishNode, Flourish
 
     @docs crossfadeNode, Crossfade
@@ -219,38 +221,46 @@ toggleAttributes { toggle, duration, forward, progress, flipFlop } =
     ]
 
 
-crossfadeAttributes : { progress : Float, duration : Int, flipFlop : Int, forward : Bool } -> List (Html.Attribute msg)
-crossfadeAttributes { duration, progress, flipFlop, forward } =
+crossfadeAttributes : { progress : Float, duration : Int, flipFlop : Int, forward : Bool, first : Bool } -> List (Html.Attribute msg)
+crossfadeAttributes { duration, progress, flipFlop, forward, first } =
     let
         delay =
             "-" ++ (String.fromFloat <| (1.0 - progress) * toFloat duration) ++ "ms"
 
         name =
             "z5h_timeline__crossfade"
+
+        pos =
+            if first then
+                [ Html.Attributes.style "position" "relative" ]
+
+            else
+                [ Html.Attributes.style "position" "absolute"
+                , Html.Attributes.style "left" "0"
+                , Html.Attributes.style "top" "0"
+                ]
     in
-    [ Html.Attributes.style "position" "absolute"
-    , Html.Attributes.style "animation-delay" delay
-    , Html.Attributes.style "animation-name" (name |> animatedName flipFlop)
-    , Html.Attributes.style "animation-direction"
-        (if forward then
-            "forwards"
+    pos
+        ++ [ Html.Attributes.style "animation-delay" delay
+           , Html.Attributes.style "animation-name" (name |> animatedName flipFlop)
+           , Html.Attributes.style "animation-direction"
+                (if forward then
+                    "forwards"
 
-         else
-            "reverse"
-        )
-    , Html.Attributes.style "animation-fill-mode" "forwards"
-    , Html.Attributes.style "animation-timing-function"
-        (if forward then
-            "ease-out"
+                 else
+                    "reverse"
+                )
+           , Html.Attributes.style "animation-fill-mode" "forwards"
+           , Html.Attributes.style "animation-timing-function"
+                (if forward then
+                    "ease-out"
 
-         else
-            "ease-in"
-        )
-    , Html.Attributes.style "animation-duration" (String.fromInt duration ++ "ms")
-
-    --, Html.Attributes.style "animation-timing-function" niceBezierString
-    , classes [ name, "in-progress" ]
-    ]
+                 else
+                    "ease-in"
+                )
+           , Html.Attributes.style "animation-duration" (String.fromInt duration ++ "ms")
+           , classes [ name, "in-progress" ]
+           ]
 
 
 toggleNode :
@@ -394,11 +404,14 @@ crossfadeNode node duration timeline attributes childView =
                         )
                    )
 
+        _ =
+            Debug.log "topStatus" topStatus
+
         flipFlop =
             timeline |> Discrete.Timeline.unwrap |> .flipFlop
 
-        transitionView : Maybe t -> Maybe t -> Float -> Maybe (Html msg)
-        transitionView maybeFrom maybeTo f =
+        transitionView : Maybe t -> Maybe t -> Float -> Bool -> Maybe (Html msg)
+        transitionView maybeFrom maybeTo f first =
             case ( maybeFrom, maybeTo ) of
                 ( Nothing, Nothing ) ->
                     Nothing
@@ -406,27 +419,46 @@ crossfadeNode node duration timeline attributes childView =
                 ( _, Just to ) ->
                     Just
                         (Html.div
-                            (crossfadeAttributes { duration = duration, progress = f, flipFlop = flipFlop, forward = True })
+                            (crossfadeAttributes
+                                { duration = duration
+                                , progress = f
+                                , flipFlop = flipFlop
+                                , forward = True
+                                , first = first
+                                }
+                            )
                             (childView to)
                         )
 
                 ( Just from, Nothing ) ->
                     Just
                         (Html.div
-                            (crossfadeAttributes { duration = duration, progress = f, flipFlop = flipFlop, forward = False })
+                            (crossfadeAttributes
+                                { duration = duration
+                                , progress = f
+                                , flipFlop = flipFlop
+                                , forward = False
+                                , first = first
+                                }
+                            )
                             (childView from)
                         )
     in
     Html.node node
-        (attributes ++ [ Html.Attributes.style "position" "relative" ])
+        (attributes
+            ++ [ Html.Attributes.style "position" "relative"
+               ]
+        )
         ((case topStatus of
             Timeline.At (Just at) ->
-                [ Html.div [ Html.Attributes.style "position" "absolute" ]
+                [ Html.div
+                    [ Html.Attributes.style "position" "relative"
+                    ]
                     (childView at)
                 ]
 
             Timeline.Transitioning _ (Just to) f ->
-                transitionView Nothing (Just to) f
+                transitionView Nothing (Just to) f True
                     |> Maybe.map List.singleton
                     |> Maybe.withDefault []
 
@@ -438,7 +470,7 @@ crossfadeNode node duration timeline attributes childView =
                         (\remainingStatus ->
                             case remainingStatus of
                                 Timeline.Transitioning from to f ->
-                                    transitionView from to f
+                                    transitionView from to f False
 
                                 Timeline.At _ ->
                                     Nothing

@@ -357,7 +357,7 @@ keyframes =
            transform: scale3d(1, 1, 1);
          }
          50% {
-           transform: scale3d(1.05, 1.05, 1.05);
+           transform: scale3d(1.1, 1.1, 1.1);
          }
          to {
            transform: scale3d(1, 1, 1);
@@ -368,7 +368,7 @@ keyframes =
            transform: scale3d(1, 1, 1);
          }
          50% {
-           transform: scale3d(1.05, 1.05, 1.05);
+           transform: scale3d(1.1, 1.1, 1.1);
          }
          to {
            transform: scale3d(1, 1, 1);
@@ -376,19 +376,25 @@ keyframes =
        }
        /*=== flash ===*/
        @keyframes z5h_timeline__flash__0 {
-         from, 50%, to {
+         from {
            opacity: 1;
          }
-         25%, 75% {
+         50% {
            opacity: 0;
+         }
+         to {
+           opacity: 1;
          }
        }
        @keyframes z5h_timeline__flash__1 {
-         from, 50%, to {
+         from {
            opacity: 1;
          }
-         25%, 75% {
+         50% {
            opacity: 0;
+         }
+         to {
+           opacity: 1;
          }
        }
        /*=== crossfade ===*/

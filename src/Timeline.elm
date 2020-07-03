@@ -98,7 +98,7 @@ transition.
 Note that history is only held long enough to ensure smooth transitions,
 based on the maximum transition duration value supplied to `init`. Older
 values stored in timeline will be automatically discarded when not needed.
-You never need to create these directly.
+You should never need to create or interrogate these directly.
 
 -}
 type alias Timeline t =
