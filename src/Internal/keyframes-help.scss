@@ -1,0 +1,29 @@
+$bits: (0, 1);
+
+@mixin shrinkX($bool) {
+  @if $bool {
+    max-width: 0;
+  } @else {
+    max-width: 1920px;
+  }
+}
+
+@mixin shrinkY($bool) {
+  @if $bool {
+    max-height: 0;
+  } @else {
+    max-height: 1080px;
+  }
+}
+
+@mixin transparent($bool) {
+  @if $bool {
+    opacity: 0;
+    pointer-events: none;
+    visibility: hidden;
+  } @else {
+    opacity: 1;
+    pointer-events: auto;
+    visibility: visible;
+  }
+}

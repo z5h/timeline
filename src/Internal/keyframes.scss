@@ -1,0 +1,206 @@
+@import "keyframes-help";
+
+/*=== scale_in ===*/
+
+.z5h_timeline__scale_in {
+  &.start {
+    @include transparent(true);
+    @include shrinkX(true);
+    @include shrinkY(true);
+    overflow: hidden;
+  }
+
+  &.in-progress {
+    pointer-events: none;
+    overflow: hidden;
+  }
+
+  &.end {
+    @include shrinkX(false);
+    @include shrinkY(false);
+  }
+}
+
+@each $bit in $bits {
+  @keyframes z5h_timeline__scale_in__#{$bit} {
+    from {
+      @include transparent(true);
+      @include shrinkX(true);
+      @include shrinkY(true);
+    }
+    to {
+      @include transparent(false);
+      @include shrinkX(false);
+      @include shrinkY(false);
+    }
+  }
+}
+
+/*=== scale_in_x ===*/
+
+.z5h_timeline__scale_in_x {
+  &.start {
+    @include transparent(true);
+    @include shrinkX(true);
+    overflow: hidden;
+  }
+
+  &.in-progress {
+    pointer-events: none;
+    overflow: hidden;
+  }
+
+  &.end {
+    @include shrinkX(false);
+  }
+}
+
+@each $bit in $bits {
+  @keyframes z5h_timeline__scale_in_x__#{$bit} {
+    from {
+      @include transparent(true);
+      @include shrinkX(true);
+    }
+    to {
+      @include transparent(false);
+      @include shrinkX(false);
+    }
+  }
+}
+
+/*=== scale_in_y ===*/
+
+.z5h_timeline__scale_in_y {
+  &.start {
+    @include transparent(true);
+    @include shrinkY(true);
+    overflow: hidden;
+  }
+
+  &.in-progress {
+    pointer-events: none;
+    overflow: hidden;
+  }
+
+  &.end {
+    @include shrinkY(false);
+  }
+}
+
+@each $bit in $bits {
+  @keyframes z5h_timeline__scale_in_y__#{$bit} {
+    from {
+      @include transparent(true);
+      @include shrinkY(true);
+    }
+    to {
+      @include transparent(false);
+      @include shrinkY(false);
+    }
+  }
+}
+
+$rotations: "90" 90deg,
+"180" 180deg,
+"360" 360deg,
+"neg90" -90deg,
+"neg180" -180deg,
+"neg360" -360deg;
+
+@mixin rotation($name, $degrees) {
+  /*=== rotate_#{$name} ===*/
+  .z5h_timeline__rotate_#{$name} {
+    &.end {
+      transform: rotate($degrees);
+    }
+  }
+
+  @each $bit in $bits {
+    @keyframes z5h_timeline__rotate_#{$name}__#{$bit} {
+      from {
+        transform: rotate($degrees);
+      }
+      to {
+        transform: rotate(0);
+      }
+    }
+  }
+
+}
+
+@each $name, $degrees in $rotations {
+  @include rotation($name, $degrees);
+}
+
+
+@mixin slide_in_from($name, $translate, $distance) {
+  /*=== slide_in_#{$name} ===*/
+  .z5h_timeline__slide_in_from_#{$name} {
+    &.end {
+      transform: #{$translate}($distance);
+    }
+  }
+  @each $bit in $bits {
+    @keyframes z5h_timeline__slide_in_from_#{$name}__#{$bit} {
+      from {
+        transform: #{$translate}($distance);
+      }
+      to {
+        transform: #{$translate}(0);
+      }
+    }
+  }
+}
+
+$slide_ins: "left" translateX -100%,
+"right" translateX 100%,
+"top" translateY -100%,
+"bottom" translateY 100%;
+
+@each $name, $translate, $distance in $slide_ins {
+  @include slide_in_from($name, $translate, $distance);
+}
+
+/*=== pulse ===*/
+@each $bit in $bits {
+  @keyframes z5h_timeline__pulse__#{$bit} {
+    from {
+      transform: scale3d(1, 1, 1);
+    }
+    50% {
+      transform: scale3d(1.1, 1.1, 1.1);
+    }
+    to {
+      transform: scale3d(1, 1, 1);
+    }
+  }
+}
+
+/*=== flash ===*/
+@each $bit in $bits {
+  @keyframes z5h_timeline__flash__#{$bit} {
+    from {
+      opacity: 1
+    }
+    50% {
+      opacity: 0
+    }
+    to {
+      opacity: 1
+    }
+  }
+}
+
+/*=== crossfade ===*/
+@each $bit in $bits {
+  @keyframes z5h_timeline__crossfade__#{$bit} {
+    from {
+      opacity: 0
+    }
+    to {
+      opacity: 1
+    }
+  }
+}
+
+
